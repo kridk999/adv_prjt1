@@ -1,0 +1,47 @@
+[build-system]
+requires = ["uv_build>=0.9.22,<0.10.0"]
+build-backend = "uv_build"
+
+[project]
+name = "prjt1"
+version = "0.0.1"
+description = "A short description of the project."
+authors = [
+  { name = "kridk,felix,jaseki", email = "your@email.com" },
+]
+
+keywords = [""]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3",
+]
+readme = "README.md"
+requires-python = ">3.12"
+dependencies = [
+    "numpy==2.4.2",
+    "torch>=2.5.1",
+    "torchvision>=0.20.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff==0.1.3"
+    ]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["I", "N", "E", "W", ]
+
+[tool.setuptools.packages.find]
+include = ["module*"]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+torchvision = { index = "pytorch-cu124" }
