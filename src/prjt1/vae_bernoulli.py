@@ -320,6 +320,8 @@ def train_and_eval_multiple_runs(model, optimizer, train_loader, test_loader, ep
     with open(f"elbo_values_{prior_type}.txt", "w") as f:
         for elbo in elbo_values:
             f.write(f"{elbo:.4f}\n")    
+        f.write(f"\nMean ELBO: {mean_elbo:.4f}\n")
+        f.write(f"Standard Deviation of ELBO: {std_elbo:.4f}\n")
     return mean_elbo, std_elbo
 
 if __name__ == "__main__":
