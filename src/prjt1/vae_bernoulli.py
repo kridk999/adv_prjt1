@@ -436,8 +436,30 @@ if __name__ == "__main__":
         evalELBO(model, mnist_test_loader, args.device)
         
     elif args.mode == 'train-multiple':
-        # Define optimizer
-        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        for prior_type in ['gaussian', 'mog', 'flow']:
+            print(f"\n{'='*50}")
+            print(f"Training with {prior_type} prior")
+            print(f"{'='*50}")
 
-        # Train and evaluate multiple runs
-        train_and_eval_multiple_runs(model, optimizer, mnist_train_loader, mnist_test_loader, args.epochs, args.device, num_runs=args.num_runs, prior_type=args.prior)
+            # Build prior
+            if prior_type == 'flow':
+                flow = Flow(base, transformations)
+                prior = FlowPrior(flow)
+            elif prior_type == 'mog':
+                prior = MoGPrior(M, args.num_components)
+            else:
+                prior = GaussianPrior(M)
+
+            # Reinitialize model and optimizer for each prior type
+            decoder = BernoulliDecoder(decoder_net)
+            encoder = GaussianEncoder(encoder_net)
+            model = VAE(prior, decoder, encoder).to(device)
+            optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+            train_and_eval_multiple_runs(
+                model, optimizer,
+                mnist_train_loader, mnist_test_loader,
+                args.epochs, args.device,
+                num_runs=args.num_runs,
+                prior_type=prior_type
+            )
