@@ -14,6 +14,8 @@ from tqdm import tqdm
 from MoGPrior import MoGPrior
 import matplotlib.pyplot as plt
 import numpy as np
+from sklearn.decomposition import PCA
+
 
 class FlowPrior(nn.Module):
     def __init__(self, flow):
@@ -212,21 +214,58 @@ def train(model, optimizer, data_loader, epochs, device):
 
         # Get aggregated posterior samples by encoding data
         z_posterior = []
-        for x, _ in mnist_test_loader:
+        labels = []
+        for x, y in mnist_test_loader:
             x = x.to(device)
-            x = (0.5 < x).float().squeeze()
             q = model.encoder(x)
             z_posterior.append(q.rsample().cpu().numpy())
+            labels.append(y.numpy())
         z_posterior = np.concatenate(z_posterior, axis=0)[:10000]
+        labels = np.concatenate(labels, axis=0)[:10000]
 
-        # Plot first two dimensions
-    plt.figure(figsize=(6, 6))
-    plt.scatter(z_prior[:, 0], z_prior[:, 1], alpha=0.3, s=5, label="Prior")
-    plt.scatter(z_posterior[:, 0], z_posterior[:, 1], alpha=0.3, s=5, label="Aggregated posterior")
-    plt.legend()
-    plt.title("Prior vs Aggregated Posterior")
-    plt.savefig("prior_vs_posterior.png")
+        # Fit PCA on combined data
+        combined = np.concatenate([z_prior, z_posterior], axis=0)
+        pca = PCA(n_components=2)
+        pca.fit(combined)
+
+        z_prior_pca = pca.transform(z_prior)
+        z_posterior_pca = pca.transform(z_posterior)
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+    # Prior plot
+    axes[0].scatter(z_prior_pca[:, 0], z_prior_pca[:, 1], alpha=0.3, s=5, c="steelblue")
+    axes[0].set_title("Prior")
+    axes[0].set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.2%})")
+    axes[0].set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.2%})")
+
+    # Posterior plot colored by digit class
+    cmap = plt.get_cmap("tab10")
+    for digit in range(10):
+        mask = labels == digit
+        axes[1].scatter(z_posterior_pca[mask, 0], z_posterior_pca[mask, 1],
+                        alpha=0.3, s=5, c=[cmap(digit)], label=str(digit))
+    axes[1].set_title("Aggregated Posterior (colored by digit)")
+    axes[1].set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.2%})")
+    axes[1].set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.2%})")
+    axes[1].legend(title="Digit", markerscale=3, loc="best")
+
+    plt.suptitle(f"Prior vs Aggregated Posterior (PCA)\nExplained variance: {pca.explained_variance_ratio_.sum():.2%}")
+    plt.tight_layout()
+    plt.savefig("prior_vs_posterior_pca.png")
     plt.show()
+
+
+def evalELBO(model, test_loader, device):
+    total_elbo = 0.0
+    num_batches = 0
+    with torch.no_grad():
+        for x, _ in test_loader:
+            elbo = model.elbo(x.to(device))
+            total_elbo += elbo.item()
+            num_batches += 1
+    print(f"Average ELBO: {total_elbo / num_batches:.4f}")
+
 
 if __name__ == "__main__":
     from torchvision import datasets, transforms
@@ -236,14 +275,14 @@ if __name__ == "__main__":
     # Parse arguments
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('mode', type=str, default='train', choices=['train', 'sample'], help='what to do when running the script (default: %(default)s)')
+    parser.add_argument('mode', type=str, default='train', choices=['train', 'sample', 'eval'], help='what to do when running the script (default: %(default)s)')
     parser.add_argument('--model', type=str, default='model.pt', help='file to save model to or load model from (default: %(default)s)')
     parser.add_argument('--samples', type=str, default='samples.png', help='file to save samples in (default: %(default)s)')
     parser.add_argument('--prior', type=str, default='gaussian', choices=['flow', 'mog', 'gaussian'], help='type of prior to use (default: %(default)s)')
-    parser.add_argument('--device', type=str, default='cpu', choices=['cpu', 'cuda', 'mps'], help='torch device (default: %(default)s)')
+    parser.add_argument('--device', type=str, default='mps', choices=['cpu', 'cuda', 'mps'], help='torch device (default: %(default)s)')
     parser.add_argument('--batch-size', type=int, default=32, metavar='N', help='batch size for training (default: %(default)s)')
     parser.add_argument('--epochs', type=int, default=10, metavar='N', help='number of epochs to train (default: %(default)s)')
-    parser.add_argument('--latent-dim', type=int, default=32, metavar='M', help='dimension of latent variable (default: %(default)s)')
+    parser.add_argument('--latent-dim', type=int, default=10, metavar='M', help='dimension of latent variable (default: %(default)s)')
     parser.add_argument('--num-components', type=int, default=3, metavar='K', help='number of MoG prior components (default: %(default)s)')
 
     args = parser.parse_args()
@@ -252,6 +291,8 @@ if __name__ == "__main__":
         print(key, '=', value)
 
     device = args.device
+    
+
 
     # Load MNIST as binarized at 'thresshold' and create data loaders
     thresshold = 0.5
@@ -272,7 +313,7 @@ if __name__ == "__main__":
 
     #mask[M//2:] = 1
     
-    for i in range(50):
+    for i in range(10):
         mask = 1 - mask
         scale_net = nn.Sequential(nn.Linear(M, 256), nn.ReLU(), nn.Linear(256, M), nn.Tanh())
         translation_net = nn.Sequential(nn.Linear(M, 256), nn.ReLU(), nn.Linear(256, M))
@@ -331,3 +372,7 @@ if __name__ == "__main__":
         with torch.no_grad():
             samples = (model.sample(64)).cpu() 
             save_image(samples.view(64, 1, 28, 28), args.samples)
+    
+    elif args.mode == 'eval':
+        model.load_state_dict(torch.load(args.model, map_location=torch.device(args.device)))
+        evalELBO(model, mnist_test_loader, args.device)
