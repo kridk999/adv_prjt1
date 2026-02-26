@@ -11,7 +11,9 @@ import torch.distributions as td
 import torch.utils.data
 from torch.nn import functional as F
 from tqdm import tqdm
-from src.prjt1.MoGPrior import MoGPrior
+from MoGPrior import MoGPrior
+import matplotlib.pyplot as plt
+import numpy as np
 
 class FlowPrior(nn.Module):
     def __init__(self, flow):
@@ -203,6 +205,29 @@ def train(model, optimizer, data_loader, epochs, device):
             progress_bar.update()
 
 
+    model.eval()
+    with torch.no_grad():
+        # Sample from prior
+        z_prior = model.prior().sample(torch.Size([10000])).cpu().numpy()
+
+        # Get aggregated posterior samples by encoding data
+        z_posterior = []
+        for x, _ in mnist_test_loader:
+            x = x.to(device)
+            x = (0.5 < x).float().squeeze()
+            q = model.encoder(x)
+            z_posterior.append(q.rsample().cpu().numpy())
+        z_posterior = np.concatenate(z_posterior, axis=0)[:10000]
+
+        # Plot first two dimensions
+    plt.figure(figsize=(6, 6))
+    plt.scatter(z_prior[:, 0], z_prior[:, 1], alpha=0.3, s=5, label="Prior")
+    plt.scatter(z_posterior[:, 0], z_posterior[:, 1], alpha=0.3, s=5, label="Aggregated posterior")
+    plt.legend()
+    plt.title("Prior vs Aggregated Posterior")
+    plt.savefig("prior_vs_posterior.png")
+    plt.show()
+
 if __name__ == "__main__":
     from torchvision import datasets, transforms
     from torchvision.utils import save_image, make_grid
@@ -219,7 +244,7 @@ if __name__ == "__main__":
     parser.add_argument('--batch-size', type=int, default=32, metavar='N', help='batch size for training (default: %(default)s)')
     parser.add_argument('--epochs', type=int, default=10, metavar='N', help='number of epochs to train (default: %(default)s)')
     parser.add_argument('--latent-dim', type=int, default=32, metavar='M', help='dimension of latent variable (default: %(default)s)')
-    parser.add_argument('--num-components', type=int, default=10, metavar='K', help='number of MoG prior components (default: %(default)s)')
+    parser.add_argument('--num-components', type=int, default=3, metavar='K', help='number of MoG prior components (default: %(default)s)')
 
     args = parser.parse_args()
     print('# Options')

@@ -23,7 +23,7 @@ class MoGPrior(nn.Module):
 
         # Learnable mixture logits, means, and log-variances
         self.logits = nn.Parameter(torch.zeros(K))
-        self.means = nn.Parameter(torch.randn(K, M))
+        self.means = nn.Parameter(torch.randn(K, M) * 3.0)
         self.log_stds = nn.Parameter(torch.zeros(K, M))
 
     def forward(self):
