@@ -11,6 +11,7 @@ import torch.distributions as td
 import torch.utils.data
 from torch.nn import functional as F
 from tqdm import tqdm
+from src.prjt1.MoGPrior import MoGPrior
 
 class FlowPrior(nn.Module):
     def __init__(self, flow):
@@ -56,7 +57,6 @@ class GaussianPrior(nn.Module):
         prior: [torch.distributions.Distribution]
         """
         return td.Independent(td.Normal(loc=self.mean, scale=self.std), 1)
-
 
 class GaussianEncoder(nn.Module):
     def __init__(self, encoder_net):
@@ -214,10 +214,12 @@ if __name__ == "__main__":
     parser.add_argument('mode', type=str, default='train', choices=['train', 'sample'], help='what to do when running the script (default: %(default)s)')
     parser.add_argument('--model', type=str, default='model.pt', help='file to save model to or load model from (default: %(default)s)')
     parser.add_argument('--samples', type=str, default='samples.png', help='file to save samples in (default: %(default)s)')
+    parser.add_argument('--prior', type=str, default='gaussian', choices=['flow', 'mog', 'gaussian'], help='type of prior to use (default: %(default)s)')
     parser.add_argument('--device', type=str, default='cpu', choices=['cpu', 'cuda', 'mps'], help='torch device (default: %(default)s)')
     parser.add_argument('--batch-size', type=int, default=32, metavar='N', help='batch size for training (default: %(default)s)')
     parser.add_argument('--epochs', type=int, default=10, metavar='N', help='number of epochs to train (default: %(default)s)')
-    parser.add_argument('--latent-dim', type=int, default=32, metavar='N', help='dimension of latent variable (default: %(default)s)')
+    parser.add_argument('--latent-dim', type=int, default=32, metavar='M', help='dimension of latent variable (default: %(default)s)')
+    parser.add_argument('--num-components', type=int, default=10, metavar='K', help='number of MoG prior components (default: %(default)s)')
 
     args = parser.parse_args()
     print('# Options')
@@ -250,10 +252,19 @@ if __name__ == "__main__":
         scale_net = nn.Sequential(nn.Linear(M, 256), nn.ReLU(), nn.Linear(256, M), nn.Tanh())
         translation_net = nn.Sequential(nn.Linear(M, 256), nn.ReLU(), nn.Linear(256, M))
         transformations.append(MaskedCouplingLayer(scale_net, translation_net, mask))
-    flow = Flow(base, transformations)
-    prior = FlowPrior(flow)
+    
+    if args.prior == 'flow':
+        flow = Flow(base, transformations)
+        prior = FlowPrior(flow)
+
+    elif args.prior == 'mog':
+        prior = MoGPrior(M, args.num_components)
+
+    else:
+        prior = GaussianPrior(M)
 
     # Define encoder and decoder networks
+
     encoder_net = nn.Sequential(
         nn.Flatten(),
         nn.Linear(784, 512),
@@ -262,7 +273,6 @@ if __name__ == "__main__":
         nn.ReLU(),
         nn.Linear(512, M*2),
     )
-
     decoder_net = nn.Sequential(
         nn.Linear(M, 512),
         nn.ReLU(),
