@@ -267,7 +267,7 @@ def evalELBO(model, test_loader, device):
     print(f"Average ELBO: {total_elbo / num_batches:.4f}")
 
 
-def train_and_eval_multiple_runs(model, optimizer, train_loader, test_loader, epochs, device, num_runs=10):
+def train_and_eval_multiple_runs(model, optimizer, train_loader, test_loader, epochs, device, num_runs=10, prior_type=None):
     """
     Train the model multiple times and evaluate the ELBO for each trained model.
 
@@ -295,43 +295,31 @@ def train_and_eval_multiple_runs(model, optimizer, train_loader, test_loader, ep
     """
     elbo_values = []
 
-    with open("elbo_values.txt", "w") as f:
-        for run in range(num_runs):
-            print(f"Run {run + 1}/{num_runs}")
-            
-            # Reinitialize the model and optimizer for each run
-            model.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
-            optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    for run in range(num_runs):
+        print(f"Run {run + 1}/{num_runs}")
+        
+        model.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        train(model, optimizer, train_loader, epochs, device)
 
-            # Train the model
-            train(model, optimizer, train_loader, epochs, device)
+        total_elbo = 0.0
+        num_batches = 0
+        with torch.no_grad():
+            for x, _ in test_loader:
+                elbo = model.elbo(x.to(device))
+                total_elbo += elbo.item()
+                num_batches += 1
+        avg_elbo = total_elbo / num_batches
+        elbo_values.append(avg_elbo)
+        print(f"Run {run + 1} ELBO: {avg_elbo:.4f}")
 
-            # Evaluate ELBO
-            total_elbo = 0.0
-            num_batches = 0
-            with torch.no_grad():
-                for x, _ in test_loader:
-                    elbo = model.elbo(x.to(device))
-                    total_elbo += elbo.item()
-                    num_batches += 1
-            avg_elbo = total_elbo / num_batches
-            elbo_values.append(avg_elbo)
-
-            # Write the ELBO value to the file
-            f.write(f"Run {run + 1} ELBO: {avg_elbo:.4f}\n")
-
-            print(f"Run {run + 1} ELBO: {avg_elbo:.4f}")
-
-    # Compute mean and standard deviation of ELBO values
     mean_elbo = np.mean(elbo_values)
     std_elbo = np.std(elbo_values)
 
     # Write the mean and standard deviation to the file
-    with open("elbo_values.txt", "a") as f:
-        f.write(f"\nELBO over {num_runs} runs: Mean = {mean_elbo:.4f}, Std = {std_elbo:.4f}\n")
-
-    print(f"ELBO over {num_runs} runs: Mean = {mean_elbo:.4f}, Std = {std_elbo:.4f}")
-    
+    with open(f"elbo_values_{prior_type}.txt", "w") as f:
+        for elbo in elbo_values:
+            f.write(f"{elbo:.4f}\n")    
     return mean_elbo, std_elbo
 
 if __name__ == "__main__":
