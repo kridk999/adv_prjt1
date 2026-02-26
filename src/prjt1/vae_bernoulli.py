@@ -207,53 +207,53 @@ def train(model, optimizer, data_loader, epochs, device):
             progress_bar.update()
 
 
-    model.eval()
-    with torch.no_grad():
-        # Sample from prior
-        z_prior = model.prior().sample(torch.Size([10000])).cpu().numpy()
+    # model.eval()
+    # with torch.no_grad():
+    #     # Sample from prior
+    #     z_prior = model.prior().sample(torch.Size([10000])).cpu().numpy()
 
-        # Get aggregated posterior samples by encoding data
-        z_posterior = []
-        labels = []
-        for x, y in mnist_test_loader:
-            x = x.to(device)
-            q = model.encoder(x)
-            z_posterior.append(q.rsample().cpu().numpy())
-            labels.append(y.numpy())
-        z_posterior = np.concatenate(z_posterior, axis=0)[:10000]
-        labels = np.concatenate(labels, axis=0)[:10000]
+    #     # Get aggregated posterior samples by encoding data
+    #     z_posterior = []
+    #     labels = []
+    #     for x, y in mnist_test_loader:
+    #         x = x.to(device)
+    #         q = model.encoder(x)
+    #         z_posterior.append(q.rsample().cpu().numpy())
+    #         labels.append(y.numpy())
+    #     z_posterior = np.concatenate(z_posterior, axis=0)[:10000]
+    #     labels = np.concatenate(labels, axis=0)[:10000]
 
-        # Fit PCA on combined data
-        combined = np.concatenate([z_prior, z_posterior], axis=0)
-        pca = PCA(n_components=2)
-        pca.fit(combined)
+    #     # Fit PCA on combined data
+    #     combined = np.concatenate([z_prior, z_posterior], axis=0)
+    #     pca = PCA(n_components=2)
+    #     pca.fit(combined)
 
-        z_prior_pca = pca.transform(z_prior)
-        z_posterior_pca = pca.transform(z_posterior)
+    #     z_prior_pca = pca.transform(z_prior)
+    #     z_posterior_pca = pca.transform(z_posterior)
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    # fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
-    # Prior plot
-    axes[0].scatter(z_prior_pca[:, 0], z_prior_pca[:, 1], alpha=0.3, s=5, c="steelblue")
-    axes[0].set_title("Prior")
-    axes[0].set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.2%})")
-    axes[0].set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.2%})")
+    # # Prior plot
+    # axes[0].scatter(z_prior_pca[:, 0], z_prior_pca[:, 1], alpha=0.3, s=5, c="steelblue")
+    # axes[0].set_title("Prior")
+    # axes[0].set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.2%})")
+    # axes[0].set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.2%})")
 
-    # Posterior plot colored by digit class
-    cmap = plt.get_cmap("tab10")
-    for digit in range(10):
-        mask = labels == digit
-        axes[1].scatter(z_posterior_pca[mask, 0], z_posterior_pca[mask, 1],
-                        alpha=0.3, s=5, c=[cmap(digit)], label=str(digit))
-    axes[1].set_title("Aggregated Posterior (colored by digit)")
-    axes[1].set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.2%})")
-    axes[1].set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.2%})")
-    axes[1].legend(title="Digit", markerscale=3, loc="best")
+    # # Posterior plot colored by digit class
+    # cmap = plt.get_cmap("tab10")
+    # for digit in range(10):
+    #     mask = labels == digit
+    #     axes[1].scatter(z_posterior_pca[mask, 0], z_posterior_pca[mask, 1],
+    #                     alpha=0.3, s=5, c=[cmap(digit)], label=str(digit))
+    # axes[1].set_title("Aggregated Posterior (colored by digit)")
+    # axes[1].set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.2%})")
+    # axes[1].set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.2%})")
+    # axes[1].legend(title="Digit", markerscale=3, loc="best")
 
-    plt.suptitle(f"Prior vs Aggregated Posterior (PCA)\nExplained variance: {pca.explained_variance_ratio_.sum():.2%}")
-    plt.tight_layout()
-    plt.savefig("prior_vs_posterior_pca.png")
-    plt.show()
+    # plt.suptitle(f"Prior vs Aggregated Posterior (PCA)\nExplained variance: {pca.explained_variance_ratio_.sum():.2%}")
+    # plt.tight_layout()
+    # plt.savefig("prior_vs_posterior_pca.png")
+    # plt.show()
 
 
 def evalELBO(model, test_loader, device):
@@ -267,6 +267,73 @@ def evalELBO(model, test_loader, device):
     print(f"Average ELBO: {total_elbo / num_batches:.4f}")
 
 
+def train_and_eval_multiple_runs(model, optimizer, train_loader, test_loader, epochs, device, num_runs=10):
+    """
+    Train the model multiple times and evaluate the ELBO for each trained model.
+
+    Parameters:
+    model: [VAE]
+        The VAE model to train and evaluate.
+    optimizer: [torch.optim.Optimizer]
+        The optimizer to use for training.
+    train_loader: [torch.utils.data.DataLoader]
+        The data loader for the training set.
+    test_loader: [torch.utils.data.DataLoader]
+        The data loader for the test set.
+    epochs: [int]
+        Number of epochs to train for each run.
+    device: [torch.device]
+        The device to use for training and evaluation.
+    num_runs: [int]
+        Number of training and evaluation runs.
+
+    Returns:
+    mean_elbo: [float]
+        The mean ELBO over the runs.
+    std_elbo: [float]
+        The standard deviation of the ELBO over the runs.
+    """
+    elbo_values = []
+
+    with open("elbo_values.txt", "w") as f:
+        for run in range(num_runs):
+            print(f"Run {run + 1}/{num_runs}")
+            
+            # Reinitialize the model and optimizer for each run
+            model.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
+            optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+            # Train the model
+            train(model, optimizer, train_loader, epochs, device)
+
+            # Evaluate ELBO
+            total_elbo = 0.0
+            num_batches = 0
+            with torch.no_grad():
+                for x, _ in test_loader:
+                    elbo = model.elbo(x.to(device))
+                    total_elbo += elbo.item()
+                    num_batches += 1
+            avg_elbo = total_elbo / num_batches
+            elbo_values.append(avg_elbo)
+
+            # Write the ELBO value to the file
+            f.write(f"Run {run + 1} ELBO: {avg_elbo:.4f}\n")
+
+            print(f"Run {run + 1} ELBO: {avg_elbo:.4f}")
+
+    # Compute mean and standard deviation of ELBO values
+    mean_elbo = np.mean(elbo_values)
+    std_elbo = np.std(elbo_values)
+
+    # Write the mean and standard deviation to the file
+    with open("elbo_values.txt", "a") as f:
+        f.write(f"\nELBO over {num_runs} runs: Mean = {mean_elbo:.4f}, Std = {std_elbo:.4f}\n")
+
+    print(f"ELBO over {num_runs} runs: Mean = {mean_elbo:.4f}, Std = {std_elbo:.4f}")
+    
+    return mean_elbo, std_elbo
+
 if __name__ == "__main__":
     from torchvision import datasets, transforms
     from torchvision.utils import save_image, make_grid
@@ -275,7 +342,7 @@ if __name__ == "__main__":
     # Parse arguments
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('mode', type=str, default='train', choices=['train', 'sample', 'eval'], help='what to do when running the script (default: %(default)s)')
+    parser.add_argument('mode', type=str, default='train', choices=['train', 'sample', 'eval', 'train-multiple'], help='what to do when running the script (default: %(default)s)')
     parser.add_argument('--model', type=str, default='model.pt', help='file to save model to or load model from (default: %(default)s)')
     parser.add_argument('--samples', type=str, default='samples.png', help='file to save samples in (default: %(default)s)')
     parser.add_argument('--prior', type=str, default='gaussian', choices=['flow', 'mog', 'gaussian'], help='type of prior to use (default: %(default)s)')
@@ -284,6 +351,8 @@ if __name__ == "__main__":
     parser.add_argument('--epochs', type=int, default=10, metavar='N', help='number of epochs to train (default: %(default)s)')
     parser.add_argument('--latent-dim', type=int, default=10, metavar='M', help='dimension of latent variable (default: %(default)s)')
     parser.add_argument('--num-components', type=int, default=3, metavar='K', help='number of MoG prior components (default: %(default)s)')
+    parser.add_argument('--num-runs', type=int, default=10, help='number of runs for training and evaluating ELBO (default: %(default)s)')
+
 
     args = parser.parse_args()
     print('# Options')
@@ -376,3 +445,10 @@ if __name__ == "__main__":
     elif args.mode == 'eval':
         model.load_state_dict(torch.load(args.model, map_location=torch.device(args.device)))
         evalELBO(model, mnist_test_loader, args.device)
+        
+    elif args.mode == 'train-multiple':
+        # Define optimizer
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+        # Train and evaluate multiple runs
+        train_and_eval_multiple_runs(model, optimizer, mnist_train_loader, mnist_test_loader, args.epochs, args.device, num_runs=args.num_runs)
