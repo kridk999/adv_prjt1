@@ -43,4 +43,4 @@ source .venv/bin/activate
 
 
 # run training
-python3 src/vae/vae_bernoulli.py train-multiple --epochs 2 --prior gaussian --num-runs 2 --device cuda
+python3 src/prjt1/vae_bernoulli.py train-multiple --epochs 2 --prior gaussian --num-runs 2 --device cuda

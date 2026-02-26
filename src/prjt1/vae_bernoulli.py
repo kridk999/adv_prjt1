@@ -439,4 +439,4 @@ if __name__ == "__main__":
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
         # Train and evaluate multiple runs
-        train_and_eval_multiple_runs(model, optimizer, mnist_train_loader, mnist_test_loader, args.epochs, args.device, num_runs=args.num_runs)
+        train_and_eval_multiple_runs(model, optimizer, mnist_train_loader, mnist_test_loader, args.epochs, args.device, num_runs=args.num_runs, prior_type=args.prior)
