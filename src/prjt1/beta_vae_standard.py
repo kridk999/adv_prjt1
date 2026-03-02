@@ -93,7 +93,7 @@ class GaussianEncoder(nn.Module):
 class GaussianDecoder(nn.Module):
     def __init__(self, decoder_net):
         """
-        Define a Bernoulli decoder distribution based on a given decoder network.
+        Define a Gaussian decoder distribution based on a given decoder network.
 
         Parameters: 
         encoder_net: [torch.nn.Module]             
@@ -103,20 +103,20 @@ class GaussianDecoder(nn.Module):
         """
         super(GaussianDecoder, self).__init__()
         self.decoder_net = decoder_net
-        self.log_std = nn.Parameter(torch.zeros(28, 28), requires_grad=True)
+        self.log_std = nn.Parameter(torch.zeros(784) - 2, requires_grad=True)
 
 
     def forward(self, z):
         """
-        Given a batch of latent variables, return a Bernoulli distribution over the data space.
+        Given a batch of latent variables, return a Gaussian distribution over the data space.
 
         Parameters:
         z: [torch.Tensor] 
            A tensor of dimension `(batch_size, M)`, where M is the dimension of the latent space.
         """
-        mean = torch.sigmoid(self.decoder_net(z))  # (batch, 28, 28)
+        mean = self.decoder_net(z)  # (batch, 28, 28)
         std = torch.exp(self.log_std)
-        return td.Independent(td.Normal(loc=mean, scale=std), 2)
+        return td.Independent(td.Normal(loc=mean, scale=std), 1)
 
 
 class VAE(nn.Module):
@@ -176,7 +176,7 @@ class VAE(nn.Module):
         return -self.elbo(x, beta)
 
 
-def train(model, optimizer, data_loader, epochs, device):
+def train(model, optimizer, data_loader, epochs, device, beta=1.0):
     """
     Train a VAE model.
 
@@ -199,7 +199,6 @@ def train(model, optimizer, data_loader, epochs, device):
 
     for epoch in range(epochs):
         data_iter = iter(data_loader)
-        beta = min(1.0, epoch / 10)
         for x in data_iter:
             x = x[0].to(device)
             optimizer.zero_grad()
@@ -346,7 +345,7 @@ if __name__ == "__main__":
     parser.add_argument('--latent-dim', type=int, default=10, metavar='M', help='dimension of latent variable (default: %(default)s)')
     parser.add_argument('--num-components', type=int, default=3, metavar='K', help='number of MoG prior components (default: %(default)s)')
     parser.add_argument('--num-runs', type=int, default=10, help='number of runs for training and evaluating ELBO (default: %(default)s)')
-
+    parser.add_argument('--beta', type=float, default=1.0, help='beta value for beta-VAE (default: %(default)s)')
 
     args = parser.parse_args()
     print('# Options')
@@ -360,12 +359,18 @@ if __name__ == "__main__":
     # Load MNIST as binarized at 'thresshold' and create data loaders
     thresshold = 0.5
     mnist_train_loader = torch.utils.data.DataLoader(datasets.MNIST('data/', train=True, download=True,
-                                                                    transform=transforms.Compose([transforms.ToTensor(),
-                                                                    transforms.Lambda(lambda x: x.squeeze())])),
+                                                                    transform=transforms.Compose([
+                                                                    transforms.ToTensor(),
+                                                                    transforms.Lambda(lambda x: x + torch.rand(x.shape) / 255),
+                                                                    transforms . Lambda ( lambda x : (x -0.5) *2.0),  # Add small noise for binarization
+                                                                    transforms.Lambda(lambda x: x . flatten ())
+                                                                    ])),
                                                     batch_size=args.batch_size, shuffle=True)
     mnist_test_loader = torch.utils.data.DataLoader(datasets.MNIST('data/', train=False, download=True,
                                                                 transform=transforms.Compose([transforms.ToTensor(),
-                                                                                              transforms.Lambda(lambda x: x.squeeze())])),
+                                                                    transforms.Lambda(lambda x: x + torch.rand(x.shape) / 255),
+                                                                    transforms . Lambda ( lambda x : (x -0.5) *2.0),  # Add small noise for binarization
+                                                                    transforms.Lambda(lambda x: x.flatten ())])),
                                                     batch_size=args.batch_size, shuffle=True)
 
     # Define prior distribution
@@ -410,7 +415,7 @@ if __name__ == "__main__":
         nn.Linear(512, 512),
         nn.ReLU(),
         nn.Linear(512, 784),
-        nn.Unflatten(-1, (28, 28))
+        #nn.Unflatten(-1, (28, 28))
     )
 
     # Define VAE model
@@ -424,7 +429,7 @@ if __name__ == "__main__":
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
         # Train model
-        train(model, optimizer, mnist_train_loader, args.epochs, args.device)
+        train(model, optimizer, mnist_train_loader, args.epochs, args.device, beta=args.beta)
 
         # Save model
         torch.save(model.state_dict(), args.model)

@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.distributions as td
 import torch.nn.functional as F
 from tqdm import tqdm
-from module1.week3.beta_vae_standard import VAE, GaussianEncoder, GaussianDecoder, GaussianPrior
+from beta_vae_standard import VAE, GaussianEncoder, GaussianDecoder, GaussianPrior
 
 class DDPM(nn.Module):
     def __init__(self, network, beta_1=1e-4, beta_T=2e-2, T=100):
@@ -53,9 +53,8 @@ class DDPM(nn.Module):
         x_t = torch.sqrt(alpha_t) * x + torch.sqrt(1 - alpha_t) * noise
         noise_pred = self.network(x_t, t.float().reshape(-1, 1))
 
-        neg_elbo = (noise - noise_pred) ** 2
-
-        return neg_elbo.sum(dim=1)
+        neg_elbo = F.mse_loss(noise_pred, noise, reduction='none')  
+        return neg_elbo.mean(dim=-1)
 
     def sample(self, shape):
         """
@@ -74,7 +73,7 @@ class DDPM(nn.Module):
         # Sample x_t given x_{t+1} until x_0 is sampled
         for t in range(self.T-1, -1, -1):
             ### Implement the remaining of Algorithm 2 here ###
-            if t > 1:
+            if t > 0:
                 z = torch.normal(0, 1, size=shape, device=self.alpha.device)
             else:
                 z = torch.zeros(shape, device=self.alpha.device)
@@ -149,6 +148,7 @@ class FcNetwork(nn.Module):
         super(FcNetwork, self).__init__()
         self.network = nn.Sequential(nn.Linear(input_dim+1, num_hidden), nn.ReLU(), 
                                      nn.Linear(num_hidden, num_hidden), nn.ReLU(), 
+                                     nn.Linear(num_hidden, num_hidden), nn.ReLU(), 
                                      nn.Linear(num_hidden, input_dim))
 
     def forward(self, x, t):
@@ -175,7 +175,7 @@ if __name__ == "__main__":
     import ToyData
     import unet
     from MoGPrior import MoGPrior
-    import latent_unet
+
 
     # Parse arguments
     import argparse
@@ -189,7 +189,7 @@ if __name__ == "__main__":
     parser.add_argument('--epochs', type=int, default=1, metavar='N', help='number of epochs to train (default: %(default)s)')
     parser.add_argument('--lr', type=float, default=1e-3, metavar='V', help='learning rate for training (default: %(default)s)')
     parser.add_argument('--latent-dim', type=int, default=10, metavar='N', help='dimension of the latent space (default: %(default)s)')
-    parser.add_argument('--prior', type=str, default='gaussian', choices=['mog', 'gaussian'], help='prior to use for the VAE (default: %(default)s)')
+    parser.add_argument('--prior', type=str, default='gaussian', choices=['mog', 'gaussian', 'flow'], help='prior to use for the VAE (default: %(default)s)')
 
     args = parser.parse_args()
     print('# Options')
@@ -201,18 +201,22 @@ if __name__ == "__main__":
     
     if args.data == 'latent-space':
         from torchvision import datasets, transforms
+        
         mnist_dataset = datasets.MNIST('data/', train=True, download=True,
             transform=transforms.Compose([
                 transforms.ToTensor(),
+                transforms.Lambda(lambda x: x + torch.rand(x.shape) / 255),
+                transforms . Lambda ( lambda x : (x -0.5) *2.0),  
                 transforms.Lambda(lambda x: x.squeeze())  # (1,28,28) → (28,28)
+
             ]))
         train_loader = torch.utils.data.DataLoader(mnist_dataset, batch_size=args.batch_size, shuffle=True)
-        test_loader = torch.utils.data.DataLoader(mnist_dataset, batch_size=args.batch_size, shuffle=True)
+        test_loader = torch.utils.data.DataLoader(mnist_dataset, batch_size=args.batch_size, shuffle=False)
     else:
         toy = {'tg': ToyData.TwoGaussians, 'cb': ToyData.Chequerboard, 'mnist': ToyData.MNIST}[args.data]()
         transform = lambda x: (x-0.5)*2.0
         train_loader = torch.utils.data.DataLoader(transform(toy().sample((n_data,))), batch_size=args.batch_size, shuffle=True)
-        test_loader = torch.utils.data.DataLoader(transform(toy().sample((n_data,))), batch_size=args.batch_size, shuffle=True)
+        test_loader = torch.utils.data.DataLoader(transform(toy().sample((n_data,))), batch_size=args.batch_size, shuffle=False)
 
     # Get the dimension of the dataset
     if args.data == 'latent-space':
@@ -222,13 +226,13 @@ if __name__ == "__main__":
 
     # Define the network
     if args.data == 'latent-space':
-        num_hidden = 256
+        num_hidden = 512
         network = FcNetwork(args.latent_dim, num_hidden)
     else:
         network = unet.Unet()
 
     # Set the number of steps in the diffusion process
-    T = 1000
+    T = 100
 
     # Define model
     model = DDPM(network, T=T).to(args.device)
@@ -250,7 +254,7 @@ if __name__ == "__main__":
             nn.Linear(512, 512),
             nn.ReLU(),
             nn.Linear(512, 784),
-            nn.Unflatten(-1, (28, 28))
+            #nn.Unflatten(-1, (28, 28))
         )
         encoder = GaussianEncoder(encoder_net)
         decoder = GaussianDecoder(decoder_net)
@@ -258,11 +262,12 @@ if __name__ == "__main__":
         
         if args.prior == 'mog':
             prior = MoGPrior(M, K=3)
-        else:
+        elif args.prior == 'gaussian':
             prior = GaussianPrior(M)
+
         
         bvae_model = VAE(prior, decoder, encoder).to(args.device)
-        bvae_model.load_state_dict(torch.load('bvae_model.pt', map_location=torch.device(args.device)))
+        bvae_model.load_state_dict(torch.load('bvae_mog.pt', map_location=torch.device(args.device)))
         bvae_model.eval()
         
         #thresshold = 0.5
@@ -276,7 +281,7 @@ if __name__ == "__main__":
                 x = x.to(args.device)
                 # Get the distribution and sample z
                 q = bvae_model.encoder(x)
-                z = q.rsample() 
+                z = q.mean
                 latent_data.append(z.cpu())
         
         latent_dataset = torch.cat(latent_data, dim=0)
@@ -322,6 +327,10 @@ if __name__ == "__main__":
                 samples = samples.view(-1, 1, 28, 28).clamp(0, 1)
                 save_image(samples, args.samples, nrow=8)
             elif args.data == 'latent-space':
+                if args.prior == 'mog':
+                    prior = MoGPrior(args.latent_dim, 3)
+                elif args.prior == 'gaussian':
+                    prior = GaussianPrior(args.latent_dim)
                 samples = (model.sample((64,M))).cpu() 
                 bvae_model.eval()
                 with torch.no_grad():
