@@ -3,7 +3,9 @@
 # Inspiration is taken from:
 # - https://github.com/jmtomczak/intro_dgm/blob/main/vaes/vae_example.ipynb
 # - https://github.com/kampta/pytorch-distributions/blob/master/gaussian_vae.py
-
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../week2')))
 from flow import Flow, GaussianBase, MaskedCouplingLayer
 import torch
 import torch.nn as nn
@@ -88,7 +90,7 @@ class GaussianEncoder(nn.Module):
         return td.Independent(td.Normal(loc=mean, scale=torch.exp(std)), 1)
 
 
-class BernoulliDecoder(nn.Module):
+class GaussianDecoder(nn.Module):
     def __init__(self, decoder_net):
         """
         Define a Bernoulli decoder distribution based on a given decoder network.
@@ -99,9 +101,10 @@ class BernoulliDecoder(nn.Module):
            input, where M is the dimension of the latent space, and outputs a
            tensor of dimension (batch_size, feature_dim1, feature_dim2).
         """
-        super(BernoulliDecoder, self).__init__()
+        super(GaussianDecoder, self).__init__()
         self.decoder_net = decoder_net
-        self.std = nn.Parameter(torch.ones(28, 28)*0.5, requires_grad=True)
+        self.log_std = nn.Parameter(torch.zeros(28, 28), requires_grad=True)
+
 
     def forward(self, z):
         """
@@ -111,8 +114,9 @@ class BernoulliDecoder(nn.Module):
         z: [torch.Tensor] 
            A tensor of dimension `(batch_size, M)`, where M is the dimension of the latent space.
         """
-        logits = self.decoder_net(z)
-        return td.Independent(td.Bernoulli(logits=logits), 2)
+        mean = torch.sigmoid(self.decoder_net(z))  # (batch, 28, 28)
+        std = torch.exp(self.log_std)
+        return td.Independent(td.Normal(loc=mean, scale=std), 2)
 
 
 class VAE(nn.Module):
@@ -135,7 +139,7 @@ class VAE(nn.Module):
         self.decoder = decoder
         self.encoder = encoder
 
-    def elbo(self, x):
+    def elbo(self, x, beta=1.0):
         """
         Compute the ELBO for the given batch of data.
 
@@ -147,7 +151,7 @@ class VAE(nn.Module):
         """
         q = self.encoder(x)
         z = q.rsample()
-        elbo = torch.mean(self.decoder(z).log_prob(x) - (q.log_prob(z) - self.prior().log_prob(z)), dim=0)
+        elbo = torch.mean(self.decoder(z).log_prob(x) - beta*(q.log_prob(z) - self.prior().log_prob(z)), dim=0)
         return elbo
 
     def sample(self, n_samples=1):
@@ -161,7 +165,7 @@ class VAE(nn.Module):
         z = self.prior().sample(torch.Size([n_samples]))
         return self.decoder(z).sample()
     
-    def forward(self, x):
+    def forward(self, x, beta=1.0):
         """
         Compute the negative ELBO for the given batch of data.
 
@@ -169,7 +173,7 @@ class VAE(nn.Module):
         x: [torch.Tensor] 
            A tensor of dimension `(batch_size, feature_dim1, feature_dim2)`
         """
-        return -self.elbo(x)
+        return -self.elbo(x, beta)
 
 
 def train(model, optimizer, data_loader, epochs, device):
@@ -195,10 +199,11 @@ def train(model, optimizer, data_loader, epochs, device):
 
     for epoch in range(epochs):
         data_iter = iter(data_loader)
+        beta = min(1.0, epoch / 10)
         for x in data_iter:
             x = x[0].to(device)
             optimizer.zero_grad()
-            loss = model(x)
+            loss = model(x, beta)
             loss.backward()
             optimizer.step()
 
@@ -355,10 +360,12 @@ if __name__ == "__main__":
     # Load MNIST as binarized at 'thresshold' and create data loaders
     thresshold = 0.5
     mnist_train_loader = torch.utils.data.DataLoader(datasets.MNIST('data/', train=True, download=True,
-                                                                    transform=transforms.Compose([transforms.ToTensor(), transforms.Lambda(lambda x: (thresshold < x).float().squeeze())])),
+                                                                    transform=transforms.Compose([transforms.ToTensor(),
+                                                                    transforms.Lambda(lambda x: x.squeeze())])),
                                                     batch_size=args.batch_size, shuffle=True)
     mnist_test_loader = torch.utils.data.DataLoader(datasets.MNIST('data/', train=False, download=True,
-                                                                transform=transforms.Compose([transforms.ToTensor(), transforms.Lambda(lambda x: (thresshold < x).float().squeeze())])),
+                                                                transform=transforms.Compose([transforms.ToTensor(),
+                                                                                              transforms.Lambda(lambda x: x.squeeze())])),
                                                     batch_size=args.batch_size, shuffle=True)
 
     # Define prior distribution
@@ -407,7 +414,7 @@ if __name__ == "__main__":
     )
 
     # Define VAE model
-    decoder = BernoulliDecoder(decoder_net)
+    decoder = GaussianDecoder(decoder_net)
     encoder = GaussianEncoder(encoder_net)
     model = VAE(prior, decoder, encoder).to(device)
 
@@ -451,7 +458,7 @@ if __name__ == "__main__":
                 prior = GaussianPrior(M)
 
             # Reinitialize model and optimizer for each prior type
-            decoder = BernoulliDecoder(decoder_net)
+            decoder = GaussianDecoder(decoder_net)
             encoder = GaussianEncoder(encoder_net)
             model = VAE(prior, decoder, encoder).to(device)
             optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
