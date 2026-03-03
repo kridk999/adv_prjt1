@@ -6,7 +6,8 @@ import torch.nn as nn
 import torch.distributions as td
 import torch.nn.functional as F
 from tqdm import tqdm
-from beta_vae_standard import VAE, GaussianEncoder, GaussianDecoder, GaussianPrior
+from beta_vae_standard import VAE, GaussianEncoder, GaussianDecoder, GaussianPrior, FlowPrior
+from flow import Flow, GaussianBase, MaskedCouplingLayer
 
 class DDPM(nn.Module):
     def __init__(self, network, beta_1=1e-4, beta_T=2e-2, T=100):
@@ -264,10 +265,26 @@ if __name__ == "__main__":
             prior = MoGPrior(M, K=3)
         elif args.prior == 'gaussian':
             prior = GaussianPrior(M)
+        elif args.prior == 'flow':
+            base = GaussianBase(M)
+            transformations = []
+            mask = torch.Tensor([i % 2 for i in range(M)])
+
+            #mask[M//2:] = 1
+            
+            for i in range(10):
+                mask = 1 - mask
+                scale_net = nn.Sequential(nn.Linear(M, 256), nn.ReLU(), nn.Linear(256, M), nn.Tanh())
+                translation_net = nn.Sequential(nn.Linear(M, 256), nn.ReLU(), nn.Linear(256, M))
+                transformations.append(MaskedCouplingLayer(scale_net, translation_net, mask))
+            
+            if args.prior == 'flow':
+                flow = Flow(base, transformations)
+                prior = FlowPrior(flow)
 
         
         bvae_model = VAE(prior, decoder, encoder).to(args.device)
-        bvae_model.load_state_dict(torch.load('bvae_mog.pt', map_location=torch.device(args.device)))
+        bvae_model.load_state_dict(torch.load('bvae_model.pt', map_location=torch.device(args.device)))
         bvae_model.eval()
         
         #thresshold = 0.5
@@ -327,10 +344,7 @@ if __name__ == "__main__":
                 samples = samples.view(-1, 1, 28, 28).clamp(0, 1)
                 save_image(samples, args.samples, nrow=8)
             elif args.data == 'latent-space':
-                if args.prior == 'mog':
-                    prior = MoGPrior(args.latent_dim, 3)
-                elif args.prior == 'gaussian':
-                    prior = GaussianPrior(args.latent_dim)
+
                 samples = (model.sample((64,M))).cpu() 
                 bvae_model.eval()
                 with torch.no_grad():
@@ -338,7 +352,7 @@ if __name__ == "__main__":
                     samples = decoder_dist.sample().cpu()
                 samples = samples.view(-1, 1, 28, 28).clamp(0, 1)
                 save_image(samples, args.samples, nrow=8)
-                
+            
             
             else:
                 samples = (model.sample((10000,D))).cpu() 
