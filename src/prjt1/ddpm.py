@@ -191,6 +191,7 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=1e-3, metavar='V', help='learning rate for training (default: %(default)s)')
     parser.add_argument('--latent-dim', type=int, default=10, metavar='N', help='dimension of the latent space (default: %(default)s)')
     parser.add_argument('--prior', type=str, default='gaussian', choices=['mog', 'gaussian', 'flow'], help='prior to use for the VAE (default: %(default)s)')
+    parser.add_argument('--bvae_model', type=str, default='bvae_model.pt', help='file to save the beta-VAE model to or load the beta-VAE model from (default: %(default)s)')
 
     args = parser.parse_args()
     print('# Options')
@@ -284,7 +285,7 @@ if __name__ == "__main__":
 
         
         bvae_model = VAE(prior, decoder, encoder).to(args.device)
-        bvae_model.load_state_dict(torch.load('bvae_model.pt', map_location=torch.device(args.device)))
+        bvae_model.load_state_dict(torch.load(args.bvae_model, map_location=torch.device(args.device)))
         bvae_model.eval()
         
         #thresshold = 0.5
