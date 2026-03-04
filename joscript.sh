@@ -44,3 +44,9 @@ source .venv/bin/activate
 
 # run training
 python3 src/prjt1/vae_bernoulli.py train-multiple --epochs 2 --prior gaussian --num-runs 2 --device cuda
+
+time python3 src/prjt1/vae_bernoulli.py train --epochs 100 --prior gaussian --device cuda --model gaussian_vae_model.pt
+
+time python3 src/prjt1/vae_bernoulli.py train --epochs 100 --prior flow --device cuda --model flow_vae_model.pt
+
+time python3 src/prjt1/vae_bernoulli.py train --epochs 100 --prior mog --device cuda --model mog_vae_model.pt --num-components 7

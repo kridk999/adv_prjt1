@@ -46,16 +46,14 @@ class DDPM(nn.Module):
             The negative ELBO of the batch of dimension `(batch_size,)`.
         """
 
-        ### Implement Algorithm 1 here ###
+
         t = torch.randint(0, self.T, (x.shape[0],), device=x.device)
         alpha_t = self.alpha_cumprod[t].reshape(-1, 1)
         noise = torch.normal(0, 1, size=x.shape, device=x.device)
-
         x_t = torch.sqrt(alpha_t) * x + torch.sqrt(1 - alpha_t) * noise
         noise_pred = self.network(x_t, t.float().reshape(-1, 1))
-
         neg_elbo = F.mse_loss(noise_pred, noise, reduction='none')  
-        return neg_elbo.mean(dim=-1)
+        return neg_elbo.sum(dim=-1)
 
     def sample(self, shape):
         """
@@ -70,18 +68,13 @@ class DDPM(nn.Module):
         """
         # Sample x_t for t=T (i.e., Gaussian noise)
         x_t = torch.randn(shape).to(self.alpha.device)
-
-        # Sample x_t given x_{t+1} until x_0 is sampled
         for t in range(self.T-1, -1, -1):
-            ### Implement the remaining of Algorithm 2 here ###
             if t > 0:
                 z = torch.normal(0, 1, size=shape, device=self.alpha.device)
             else:
                 z = torch.zeros(shape, device=self.alpha.device)
-            
             t_batch = torch.full((shape[0], 1), t, device=self.alpha.device, dtype=torch.float)
             x_t = (1 / torch.sqrt(self.alpha[t])) * (x_t - ((1 - self.alpha[t]) / torch.sqrt(1 - self.alpha_cumprod[t])) * self.network(x_t, t_batch)) + torch.sqrt(self.beta[t]) * z
-
         return x_t
 
     def loss(self, x):
@@ -234,7 +227,7 @@ if __name__ == "__main__":
         network = unet.Unet()
 
     # Set the number of steps in the diffusion process
-    T = 100
+    T = 1000
 
     # Define model
     model = DDPM(network, T=T).to(args.device)
@@ -299,7 +292,7 @@ if __name__ == "__main__":
                 x = x.to(args.device)
                 # Get the distribution and sample z
                 q = bvae_model.encoder(x)
-                z = q.mean
+                z = q.sample()
                 latent_data.append(z.cpu())
         
         latent_dataset = torch.cat(latent_data, dim=0)

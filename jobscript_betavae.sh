@@ -48,3 +48,6 @@ python3 src/prjt1/beta_vae_standard.py train --model bvae_model.pt --epochs 50 -
 python3 src/prjt1/ddpm.py train --data latent-space --epochs 100 --prior flow --device cuda --model latent_ddpm_model.pt
 
 python3 src/prjt1/ddpm.py sample --data latent-space --model latent_ddpm_model.pt
+
+
+time python3 src/prjt1/ddpm.py train --data mnist --epochs 100 --device cuda --model 1000mnist_dppm_model.pt
