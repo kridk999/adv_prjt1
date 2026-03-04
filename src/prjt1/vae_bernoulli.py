@@ -206,54 +206,61 @@ def train(model, optimizer, data_loader, epochs, device):
             progress_bar.set_postfix(loss=f"⠀{loss.item():12.4f}", epoch=f"{epoch+1}/{epochs}")
             progress_bar.update()
 
+def plot_prior_vs_posterior(model, mnist_test_loader, device):
+    model.eval()
+    with torch.no_grad():
+        # Sample from prior
+        z_prior = model.prior().sample(torch.Size([1000])).cpu().numpy()
 
-    # model.eval()
-    # with torch.no_grad():
-    #     # Sample from prior
-    #     z_prior = model.prior().sample(torch.Size([10000])).cpu().numpy()
+        # Get aggregated posterior samples by encoding data
+        z_posterior = []
+        labels = []
+        for x, y in mnist_test_loader:
+            x = x.to(device)
+            q = model.encoder(x)
+            z_posterior.append(q.rsample().cpu().numpy())
+            labels.append(y.numpy())
+        z_posterior = np.concatenate(z_posterior, axis=0)[:1000]
+        labels = np.concatenate(labels, axis=0)[:1000]
 
-    #     # Get aggregated posterior samples by encoding data
-    #     z_posterior = []
-    #     labels = []
-    #     for x, y in mnist_test_loader:
-    #         x = x.to(device)
-    #         q = model.encoder(x)
-    #         z_posterior.append(q.rsample().cpu().numpy())
-    #         labels.append(y.numpy())
-    #     z_posterior = np.concatenate(z_posterior, axis=0)[:10000]
-    #     labels = np.concatenate(labels, axis=0)[:10000]
+        # Fit PCA on combined data
+        combined = np.concatenate([z_prior, z_posterior], axis=0)
+        pca = PCA(n_components=2)
+        pca.fit(combined)
 
-    #     # Fit PCA on combined data
-    #     combined = np.concatenate([z_prior, z_posterior], axis=0)
-    #     pca = PCA(n_components=2)
-    #     pca.fit(combined)
+        z_prior_pca = pca.transform(z_prior)
+        z_posterior_pca = pca.transform(z_posterior)
 
-    #     z_prior_pca = pca.transform(z_prior)
-    #     z_posterior_pca = pca.transform(z_posterior)
+    fig, ax = plt.subplots(1, 1, figsize=(8, 5))
 
-    # fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    # Estimate prior density via KDE and plot as filled contour
+    from scipy.stats import gaussian_kde
+    kde = gaussian_kde(z_prior_pca.T)
 
-    # # Prior plot
-    # axes[0].scatter(z_prior_pca[:, 0], z_prior_pca[:, 1], alpha=0.3, s=5, c="steelblue")
-    # axes[0].set_title("Prior")
-    # axes[0].set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.2%})")
-    # axes[0].set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.2%})")
+    # Create grid for contour
+    x_min = min(z_prior_pca[:, 0].min(), z_posterior_pca[:, 0].min()) - 1
+    x_max = max(z_prior_pca[:, 0].max(), z_posterior_pca[:, 0].max()) + 1
+    y_min = min(z_prior_pca[:, 1].min(), z_posterior_pca[:, 1].min()) - 1
+    y_max = max(z_prior_pca[:, 1].max(), z_posterior_pca[:, 1].max()) + 1
 
-    # # Posterior plot colored by digit class
-    # cmap = plt.get_cmap("tab10")
-    # for digit in range(10):
-    #     mask = labels == digit
-    #     axes[1].scatter(z_posterior_pca[mask, 0], z_posterior_pca[mask, 1],
-    #                     alpha=0.3, s=5, c=[cmap(digit)], label=str(digit))
-    # axes[1].set_title("Aggregated Posterior (colored by digit)")
-    # axes[1].set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.2%})")
-    # axes[1].set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.2%})")
-    # axes[1].legend(title="Digit", markerscale=3, loc="best")
+    xx, yy = np.meshgrid(np.linspace(x_min, x_max, 200),
+                         np.linspace(y_min, y_max, 200))
+    grid_points = np.vstack([xx.ravel(), yy.ravel()])
+    zz = kde(grid_points).reshape(xx.shape)
 
-    # plt.suptitle(f"Prior vs Aggregated Posterior (PCA)\nExplained variance: {pca.explained_variance_ratio_.sum():.2%}")
-    # plt.tight_layout()
-    # plt.savefig("prior_vs_posterior_pca.png")
-    # plt.show()
+    # Plot prior as filled contour
+    ax.contourf(xx, yy, zz, levels=10, cmap="viridis")
+
+    # Plot posterior samples as black dots
+    ax.scatter(z_posterior_pca[:, 0], z_posterior_pca[:, 1],
+               alpha=0.4, s=5, c="black", edgecolors="none")
+
+    plt.tight_layout()
+    plt.title("Prior and Aggregated Posterior in PCA Space for Flow prior")
+    plt.xlabel("PCA Component 1")
+    plt.ylabel("PCA Component 2")
+    plt.savefig("plots/prior_vs_posterior_pca_flow.png", dpi=150)
+    plt.show()
 
 
 def evalELBO(model, test_loader, device):
@@ -331,7 +338,7 @@ if __name__ == "__main__":
     # Parse arguments
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('mode', type=str, default='train', choices=['train', 'sample', 'eval', 'train-multiple'], help='what to do when running the script (default: %(default)s)')
+    parser.add_argument('mode', type=str, default='train', choices=['train', 'plot', 'sample', 'eval', 'train-multiple'], help='what to do when running the script (default: %(default)s)')
     parser.add_argument('--model', type=str, default='model.pt', help='file to save model to or load model from (default: %(default)s)')
     parser.add_argument('--samples', type=str, default='samples.png', help='file to save samples in (default: %(default)s)')
     parser.add_argument('--prior', type=str, default='gaussian', choices=['flow', 'mog', 'gaussian'], help='type of prior to use (default: %(default)s)')
@@ -339,7 +346,7 @@ if __name__ == "__main__":
     parser.add_argument('--batch-size', type=int, default=32, metavar='N', help='batch size for training (default: %(default)s)')
     parser.add_argument('--epochs', type=int, default=10, metavar='N', help='number of epochs to train (default: %(default)s)')
     parser.add_argument('--latent-dim', type=int, default=10, metavar='M', help='dimension of latent variable (default: %(default)s)')
-    parser.add_argument('--num-components', type=int, default=3, metavar='K', help='number of MoG prior components (default: %(default)s)')
+    parser.add_argument('--num-components', type=int, default=7, metavar='K', help='number of MoG prior components (default: %(default)s)')
     parser.add_argument('--num-runs', type=int, default=10, help='number of runs for training and evaluating ELBO (default: %(default)s)')
 
 
@@ -421,6 +428,10 @@ if __name__ == "__main__":
 
         # Save model
         torch.save(model.state_dict(), args.model)
+    
+    elif args.mode == 'plot':
+        model.load_state_dict(torch.load(args.model, map_location=torch.device(args.device)))
+        plot_prior_vs_posterior(model, mnist_test_loader, device)
 
     elif args.mode == 'sample':
         model.load_state_dict(torch.load(args.model, map_location=torch.device(args.device)))
