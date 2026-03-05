@@ -231,24 +231,49 @@ if __name__ == '__main__':
                 #display only 64 samples in an 8x8 grid
                 samples = (model.sample((args.batch_size,D))).cpu() 
                 samples = samples.view(-1, 1, 28, 28).clamp(0, 1)
+
             elif args.data == 'latent-space':
                 samples = (model.sample((args.batch_size,M))).cpu() 
                 bvae_model.eval()
                 with torch.no_grad():
                     decoder_dist = bvae_model.decoder(samples.to(args.device))
-                    samples = decoder_dist.mean.cpu()
+                    samples = decoder_dist.mean.cpu()  # ← mean, no decoder noise
                 samples = samples.view(-1, 1, 28, 28)
                 samples = (samples / 2 + 0.5).clamp(0, 1)
                 save_image(samples, args.samples, nrow=8)
+    
+    print("Decoding MNIST test data using VAE decoder...")
+    with torch.no_grad():
+        x_test = next(iter(test_loader))[0].to(args.device)
+        q = bvae_model.encoder(x_test)
+        z = q.mean  # ← deterministic, fair reconstruction comparison
+        vae_decoded = bvae_model.decoder(z).mean.cpu()  # ← mean, no decoder noise
+        vae_decoded = vae_decoded.view(-1, 1, 28, 28)
+        vae_decoded = (vae_decoded / 2 + 0.5).clamp(0, 1)
+        save_image(vae_decoded, "vae_decoded_samples.png", nrow=8)
+
+    
+    # Compute FID for VAE decoded samples
+    vae_fid_score = compute_fid(
+        (x_test.unsqueeze(1) / 2 + 0.5).cpu(),  # real images, rescaled
+        vae_decoded.cpu(),
+        device='cpu'
+    )
+    with open(f"fid_score_vae_{args.data}_{args.prior}.txt", "w") as f:
+        f.write(f"VAE Decoder FID score: {vae_fid_score:.4f}\n")
+        f.write(f"Model: {args.bvae_model}\n")
+        f.write(f"Prior: {args.prior}\n")
+        f.write(f"Latent dim: {args.latent_dim}\n")
+    print(f"VAE Decoder FID score: {vae_fid_score:.4f}")
 
 
     fid_score = compute_fid(
-        next(iter(test_loader))[0].unsqueeze(1).to(args.device), 
-        samples.to(args.device),
-        device=args.device
-    )    
+        (next(iter(test_loader))[0].unsqueeze(1) / 2 + 0.5).to('cpu'),  # rescale [-1,1] → [0,1]
+        samples.cpu(),
+        device='cpu'
+    )
     
-    with open(f"fid_score_{args.data}_{args.prior}.txt", "w") as f:
+    with open(f"fid_score_ddpm_{args.data}_{args.prior}.txt", "w") as f:
         f.write(f"FID score: {fid_score:.4f}\n")
         f.write(f"Model: {args.model}\n")
         f.write(f"Prior: {args.prior}\n")

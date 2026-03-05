@@ -44,8 +44,35 @@ source .venv/bin/activate
 
 # run training
 #python3 src/prjt1/vae_bernoulli.py train-multiple --epochs 2 --prior gaussian --num-runs 2 --device cuda
-python3 src/prjt1/beta_vae_standard.py train --prior flow --latent-dim 64 --num-transformations 40 --beta 1 --model b1flow64_vae_model.pt --epochs 100 --device cuda
+# Train VAE (higher beta for smoother latent space)
+time python3 src/prjt1/beta_vae_standard.py train \
+    --prior flow \
+    --latent-dim 16 \
+    --num-transformations 20 \
+    --beta 0.5 \
+    --model b0.5flow16_vae_model.pt \
+    --epochs 50 \
+    --device mps
 
-python3 src/prjt1/ddpm.py train --data latent-space --device cuda --epochs 200 --latent-dim 64 --prior flow --bvae-model b1flow64_vae_model.pt --num-transformations 40 --model ddpm_flow64_model.pt
+# Train latent DDPM (lower lr, more epochs)
+time python3 src/prjt1/ddpm.py train \
+    --data latent-space \
+    --device mps \
+    --epochs 100 \
+    --lr 1e-4 \
+    --latent-dim 16 \
+    --prior flow \
+    --bvae-model b0.5flow16_vae_model.pt \
+    --num-transformations 20 \
+    --model ddpm_flow16_model.pt
 
-python3 src/prjt1/fid.py sample --data latent-space --prior flow --latent-dim 64 --bvae-model b1flow64_vae_model.pt --device cuda --num-transformations 40 --model ddpm_flow64_model.pt                       
+# Sample and compute FID
+time python3 src/prjt1/fid.py sample \
+    --data latent-space \
+    --prior flow \
+    --latent-dim 16 \
+    --bvae-model b0.5flow16_vae_model.pt \
+    --device mps \
+    --num-transformations 20 \
+    --model ddpm_flow16_model.pt \
+    --sample ddpm_samples.png

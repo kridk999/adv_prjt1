@@ -210,7 +210,7 @@ if __name__ == "__main__":
                 transforms.ToTensor(),
                 transforms.Lambda(lambda x: x + torch.rand(x.shape) / 255),
                 transforms . Lambda ( lambda x : (x -0.5) *2.0),  
-                transforms.Lambda(lambda x: x.flatten())  # (1,28,28) → (28,28)
+                transforms.Lambda(lambda x: x.flatten())
 
             ]))
         train_loader = torch.utils.data.DataLoader(mnist_dataset, batch_size=args.batch_size, shuffle=True)
@@ -298,9 +298,8 @@ if __name__ == "__main__":
         with torch.no_grad():
             for x, _ in train_loader:
                 x = x.to(args.device)
-                # Get the distribution and sample z
                 q = bvae_model.encoder(x)
-                z = q.mean
+                z = q.rsample()  # ← stochastic, good for training
                 latent_data.append(z.cpu())
         
         latent_dataset = torch.cat(latent_data, dim=0)
@@ -346,7 +345,6 @@ if __name__ == "__main__":
                 samples = samples.view(-1, 1, 28, 28).clamp(0, 1)
                 save_image(samples, args.samples, nrow=8)
             elif args.data == 'latent-space':
-
                 samples = (model.sample((64,M))).cpu() 
                 bvae_model.eval()
                 with torch.no_grad():
