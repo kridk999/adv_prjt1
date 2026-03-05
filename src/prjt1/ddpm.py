@@ -210,7 +210,7 @@ if __name__ == "__main__":
                 transforms.ToTensor(),
                 transforms.Lambda(lambda x: x + torch.rand(x.shape) / 255),
                 transforms . Lambda ( lambda x : (x -0.5) *2.0),  
-                transforms.Lambda(lambda x: x.squeeze())  # (1,28,28) → (28,28)
+                transforms.Lambda(lambda x: x.flatten())  # (1,28,28) → (28,28)
 
             ]))
         train_loader = torch.utils.data.DataLoader(mnist_dataset, batch_size=args.batch_size, shuffle=True)
@@ -351,8 +351,9 @@ if __name__ == "__main__":
                 bvae_model.eval()
                 with torch.no_grad():
                     decoder_dist = bvae_model.decoder(samples.to(args.device))
-                    samples = decoder_dist.sample().cpu()
-                samples = samples.view(-1, 1, 28, 28).clamp(0, 1)
+                    samples = decoder_dist.mean.cpu()
+                samples = samples.view(-1, 1, 28, 28)
+                samples = (samples / 2 + 0.5).clamp(0, 1)
                 save_image(samples, args.samples, nrow=8)
             
             

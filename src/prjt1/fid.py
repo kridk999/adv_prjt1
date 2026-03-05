@@ -236,8 +236,9 @@ if __name__ == '__main__':
                 bvae_model.eval()
                 with torch.no_grad():
                     decoder_dist = bvae_model.decoder(samples.to(args.device))
-                    samples = decoder_dist.sample().cpu()
-                samples = samples.view(-1, 1, 28, 28).clamp(-1, 1)
+                    samples = decoder_dist.mean.cpu()
+                samples = samples.view(-1, 1, 28, 28)
+                samples = (samples / 2 + 0.5).clamp(0, 1)
                 save_image(samples, args.samples, nrow=8)
 
 

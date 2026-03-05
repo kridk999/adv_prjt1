@@ -48,4 +48,4 @@ python3 src/prjt1/beta_vae_standard.py train --prior flow --latent-dim 64 --num-
 
 python3 src/prjt1/ddpm.py train --data latent-space --device cuda --epochs 200 --latent-dim 64 --prior flow --bvae-model b1flow64_vae_model.pt --num-transformations 40 --model ddpm_flow64_model.pt
 
-python3 src/prjt1/fid.py sample --data latent-space --prior flow --latent-dim 64 --bvae-model b0.5mog32_vae_model.pt --device cuda --num-transformations 40 --model ddpm_flow64_model.pt                       
+python3 src/prjt1/fid.py sample --data latent-space --prior flow --latent-dim 64 --bvae-model b1flow64_vae_model.pt --device cuda --num-transformations 40 --model ddpm_flow64_model.pt                       
