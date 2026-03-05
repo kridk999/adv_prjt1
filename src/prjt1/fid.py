@@ -114,23 +114,36 @@ if __name__ == '__main__':
         print(key, '=', value)
         
         
-            
-    mnist_dataset = datasets.MNIST('data/', train=True, download=True,
-        transform=transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Lambda(lambda x: x + torch.rand(x.shape) / 255),
-            transforms . Lambda ( lambda x : (x -0.5) *2.0),  
-            transforms.Lambda(lambda x: x.squeeze())  # (1,28,28) → (28,28)
+    if args.data == 'mnist':
+        mnist_dataset = datasets.MNIST('data/', train=True, download=True,
+            transform=transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Lambda(lambda x: x + torch.rand(x.shape) / 255),
+                transforms . Lambda ( lambda x : (x -0.5) *2.0),  
+                transforms.Lambda(lambda x: x.squeeze())  # (1,28,28) → (28,28)
 
-        ]))
-    
-    train_loader = torch.utils.data.DataLoader(mnist_dataset, batch_size=args.batch_size, shuffle=True)
-    test_loader = torch.utils.data.DataLoader(mnist_dataset, batch_size=args.batch_size, shuffle=False)
+            ]))
         
+        train_loader = torch.utils.data.DataLoader(mnist_dataset, batch_size=args.batch_size, shuffle=True)
+        test_loader = torch.utils.data.DataLoader(mnist_dataset, batch_size=args.batch_size, shuffle=False)
+
+    if args.data == 'latent-space':
+        # We will encode the MNIST dataset into a latent space using a pre-trained VAE, and then train the DDPM in that latent space.
+        mnist_dataset = datasets.MNIST('data/', train=True, download=True,
+            transform=transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Lambda(lambda x: x + torch.rand(x.shape) / 255),
+                transforms.Lambda(lambda x: x.squeeze())
+            ]))
+        train_loader = torch.utils.data.DataLoader(mnist_dataset, batch_size=args.batch_size, shuffle=True)
+        test_loader = torch.utils.data.DataLoader(mnist_dataset, batch_size=args.batch_size, shuffle=False)
+
+    M = args.latent_dim
     if args.data == 'latent-space':
         D = next(iter(train_loader))[0].shape[1]
-    else:
-        D = next(iter(train_loader)).shape[1]
+    elif args.data == 'mnist':
+        D = 28 * 28
+
         
         # Set the number of steps in the diffusion process
     T = 1000
@@ -167,54 +180,54 @@ if __name__ == '__main__':
         encoder = GaussianEncoder(encoder_net)
         decoder = GaussianDecoder(decoder_net)
 
-    
-    
-    if args.prior == 'mog':
-            prior = MoGPrior(M, K=7)
-    elif args.prior == 'gaussian':
-        prior = GaussianPrior(M)
-    elif args.prior == 'flow':
-        base = GaussianBase(M)
-        transformations = []
-        mask = torch.Tensor([i % 2 for i in range(M)])
-
-        #mask[M//2:] = 1
         
-        for i in range(args.num_transformations):
-            mask = 1 - mask
-            scale_net = nn.Sequential(nn.Linear(M, 256), nn.ReLU(), nn.Linear(256, M), nn.Tanh())
-            translation_net = nn.Sequential(nn.Linear(M, 256), nn.ReLU(), nn.Linear(256, M))
-            transformations.append(MaskedCouplingLayer(scale_net, translation_net, mask))
+        
+        if args.prior == 'mog':
+                prior = MoGPrior(M, K=7)
+        elif args.prior == 'gaussian':
+            prior = GaussianPrior(M)
+        elif args.prior == 'flow':
+            base = GaussianBase(M)
+            transformations = []
+            mask = torch.Tensor([i % 2 for i in range(M)])
 
-        flow = Flow(base, transformations)
-        prior = FlowPrior(flow)
+            #mask[M//2:] = 1
+            
+            for i in range(args.num_transformations):
+                mask = 1 - mask
+                scale_net = nn.Sequential(nn.Linear(M, 256), nn.ReLU(), nn.Linear(256, M), nn.Tanh())
+                translation_net = nn.Sequential(nn.Linear(M, 256), nn.ReLU(), nn.Linear(256, M))
+                transformations.append(MaskedCouplingLayer(scale_net, translation_net, mask))
 
+            flow = Flow(base, transformations)
+            prior = FlowPrior(flow)
+
+        
+        bvae_model = VAE(prior, decoder, encoder).to(args.device)
+        bvae_model.load_state_dict(torch.load(args.bvae_model, map_location=torch.device(args.device)))
+        bvae_model.eval()
     
-    bvae_model = VAE(prior, decoder, encoder).to(args.device)
-    bvae_model.load_state_dict(torch.load(args.bvae_model, map_location=torch.device(args.device)))
-    bvae_model.eval()
-    
-    #thresshold = 0.5
-    #binarized_data = (thresshold < toy().sample((n_data,))).float()
-    #train_loader = torch.utils.data.DataLoader(binarized_data, batch_size=args.batch_size, shuffle=True)
-    
-    print("Encoding dataset to latents...")
-    latent_data = []
-    with torch.no_grad():
-        for x, _ in train_loader:
-            x = x.to(args.device)
-            # Get the distribution and sample z
-            q = bvae_model.encoder(x)
-            z = q.sample()
-            latent_data.append(z.cpu())
-    
-    latent_dataset = torch.cat(latent_data, dim=0)
-    
-    train_loader_latents = torch.utils.data.DataLoader(
-        torch.utils.data.TensorDataset(latent_dataset), 
-        batch_size=args.batch_size, 
-        shuffle=True
-    )
+        #thresshold = 0.5
+        #binarized_data = (thresshold < toy().sample((n_data,))).float()
+        #train_loader = torch.utils.data.DataLoader(binarized_data, batch_size=args.batch_size, shuffle=True)
+        
+        print("Encoding dataset to latents...")
+        latent_data = []
+        with torch.no_grad():
+            for x, _ in train_loader:
+                x = x.to(args.device)
+                # Get the distribution and sample z
+                q = bvae_model.encoder(x)
+                z = q.sample()
+                latent_data.append(z.cpu())
+        
+        latent_dataset = torch.cat(latent_data, dim=0)
+        
+        train_loader_latents = torch.utils.data.DataLoader(
+            torch.utils.data.TensorDataset(latent_dataset), 
+            batch_size=args.batch_size, 
+            shuffle=True
+        )
     
     if args.mode == 'sample':
         import numpy as np
@@ -227,10 +240,10 @@ if __name__ == '__main__':
         with torch.no_grad():
             
             if args.data == 'mnist':
-                # Reshape to 28x28 images and clamp to [0, 1]
-                #display only 64 samples in an 8x8 grid
-                samples = (model.sample((args.batch_size,D))).cpu() 
-                samples = samples.view(-1, 1, 28, 28).clamp(0, 1)
+                samples = (model.sample((args.batch_size, D))).cpu() 
+                samples = samples.view(-1, 1, 28, 28)
+                samples = (samples / 2 + 0.5).clamp(0, 1)
+                save_image(samples, args.samples, nrow=8)
 
             elif args.data == 'latent-space':
                 samples = (model.sample((args.batch_size,M))).cpu() 
@@ -242,29 +255,30 @@ if __name__ == '__main__':
                 samples = (samples / 2 + 0.5).clamp(0, 1)
                 save_image(samples, args.samples, nrow=8)
     
-    print("Decoding MNIST test data using VAE decoder...")
-    with torch.no_grad():
-        x_test = next(iter(test_loader))[0].to(args.device)
-        q = bvae_model.encoder(x_test)
-        z = q.mean  # ← deterministic, fair reconstruction comparison
-        vae_decoded = bvae_model.decoder(z).mean.cpu()  # ← mean, no decoder noise
-        vae_decoded = vae_decoded.view(-1, 1, 28, 28)
-        vae_decoded = (vae_decoded / 2 + 0.5).clamp(0, 1)
-        save_image(vae_decoded, "vae_decoded_samples.png", nrow=8)
+    if args.data == 'latent-space':
+        print("Decoding MNIST test data using VAE decoder...")
+        with torch.no_grad():
+            x_test = next(iter(test_loader))[0].to(args.device)
+            q = bvae_model.encoder(x_test)
+            z = q.mean  # ← deterministic, fair reconstruction comparison
+            vae_decoded = bvae_model.decoder(z).mean.cpu()  # ← mean, no decoder noise
+            vae_decoded = vae_decoded.view(-1, 1, 28, 28)
+            vae_decoded = (vae_decoded / 2 + 0.5).clamp(0, 1)
+            save_image(vae_decoded, "vae_decoded_samples.png", nrow=8)
 
-    
-    # Compute FID for VAE decoded samples
-    vae_fid_score = compute_fid(
-        (x_test.unsqueeze(1) / 2 + 0.5).cpu(),  # real images, rescaled
-        vae_decoded.cpu(),
-        device='cpu'
-    )
-    with open(f"fid_score_vae_{args.data}_{args.prior}.txt", "w") as f:
-        f.write(f"VAE Decoder FID score: {vae_fid_score:.4f}\n")
-        f.write(f"Model: {args.bvae_model}\n")
-        f.write(f"Prior: {args.prior}\n")
-        f.write(f"Latent dim: {args.latent_dim}\n")
-    print(f"VAE Decoder FID score: {vae_fid_score:.4f}")
+        
+        # Compute FID for VAE decoded samples
+        vae_fid_score = compute_fid(
+            (x_test.unsqueeze(1) / 2 + 0.5).cpu(),  # real images, rescaled
+            vae_decoded.cpu(),
+            device='cpu'
+        )
+        with open(f"fid_score_vae_{args.data}_{args.prior}.txt", "w") as f:
+            f.write(f"VAE Decoder FID score: {vae_fid_score:.4f}\n")
+            f.write(f"Model: {args.bvae_model}\n")
+            f.write(f"Prior: {args.prior}\n")
+            f.write(f"Latent dim: {args.latent_dim}\n")
+        print(f"VAE Decoder FID score: {vae_fid_score:.4f}")
 
 
     fid_score = compute_fid(
@@ -273,7 +287,8 @@ if __name__ == '__main__':
         device='cpu'
     )
     
-    with open(f"fid_score_ddpm_{args.data}_{args.prior}.txt", "w") as f:
+    ddpm_name = f"fid_score_ddpm_{args.data}.txt"
+    with open(ddpm_name, "w") as f:
         f.write(f"FID score: {fid_score:.4f}\n")
         f.write(f"Model: {args.model}\n")
         f.write(f"Prior: {args.prior}\n")
@@ -281,4 +296,4 @@ if __name__ == '__main__':
     
     print(f"FID score: {fid_score:.4f}")
     
-    
+ 
