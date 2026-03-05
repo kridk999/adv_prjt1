@@ -346,6 +346,7 @@ if __name__ == "__main__":
     parser.add_argument('--num-components', type=int, default=3, metavar='K', help='number of MoG prior components (default: %(default)s)')
     parser.add_argument('--num-runs', type=int, default=10, help='number of runs for training and evaluating ELBO (default: %(default)s)')
     parser.add_argument('--beta', type=float, default=1.0, help='beta value for beta-VAE (default: %(default)s)')
+    parser.add_argument('--num-transformations', type=int, default=40, help='number of transformations for flow prior (default: %(default)s)')
 
     args = parser.parse_args()
     print('# Options')
@@ -383,7 +384,7 @@ if __name__ == "__main__":
 
     #mask[M//2:] = 1
     
-    for i in range(10):
+    for i in range(args.num_transformations):
         mask = 1 - mask
         scale_net = nn.Sequential(nn.Linear(M, 256), nn.ReLU(), nn.Linear(256, M), nn.Tanh())
         translation_net = nn.Sequential(nn.Linear(M, 256), nn.ReLU(), nn.Linear(256, M))

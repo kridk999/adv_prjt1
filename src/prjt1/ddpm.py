@@ -191,6 +191,8 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=1e-3, metavar='V', help='learning rate for training (default: %(default)s)')
     parser.add_argument('--latent-dim', type=int, default=10, metavar='N', help='dimension of the latent space (default: %(default)s)')
     parser.add_argument('--prior', type=str, default='gaussian', choices=['mog', 'gaussian', 'flow'], help='prior to use for the VAE (default: %(default)s)')
+    parser.add_argument('--bvae-model', type=str, default='b0.5vae_model.pt', help='file to load the VAE model from (default: %(default)s)')
+    parser.add_argument('--num-transformations', type=int, default=40, help='number of transformations for flow prior (default: %(default)s)')
 
     args = parser.parse_args()
     print('# Options')
@@ -227,13 +229,13 @@ if __name__ == "__main__":
 
     # Define the network
     if args.data == 'latent-space':
-        num_hidden = 512
+        num_hidden = 1024
         network = FcNetwork(args.latent_dim, num_hidden)
     else:
         network = unet.Unet()
 
     # Set the number of steps in the diffusion process
-    T = 100
+    T = 1000
 
     # Define model
     model = DDPM(network, T=T).to(args.device)
@@ -272,7 +274,7 @@ if __name__ == "__main__":
 
             #mask[M//2:] = 1
             
-            for i in range(10):
+            for i in range(args.num_transformations):
                 mask = 1 - mask
                 scale_net = nn.Sequential(nn.Linear(M, 256), nn.ReLU(), nn.Linear(256, M), nn.Tanh())
                 translation_net = nn.Sequential(nn.Linear(M, 256), nn.ReLU(), nn.Linear(256, M))
@@ -284,7 +286,7 @@ if __name__ == "__main__":
 
         
         bvae_model = VAE(prior, decoder, encoder).to(args.device)
-        bvae_model.load_state_dict(torch.load('bvae_model.pt', map_location=torch.device(args.device)))
+        bvae_model.load_state_dict(torch.load(args.bvae_model, map_location=torch.device(args.device)))
         bvae_model.eval()
         
         #thresshold = 0.5
